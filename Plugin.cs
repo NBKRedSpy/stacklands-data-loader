@@ -28,6 +28,7 @@ namespace DataLoaderPlugin
         {
             load_boosters(__instance);
             load_harvestable(__instance);
+            load_mobs(__instance);
         }
 
         private static void load_boosters(WorldManager worldManager)
@@ -75,6 +76,36 @@ namespace DataLoaderPlugin
                 sw.Write($"  time: {card.HarvestTime}\n");
             }
 
+            sw.Close();
+        }
+
+        private static void load_mobs(WorldManager worldManager)
+        {
+            Plugin.Log.LogInfo($"Load Mobs");
+            var cards = worldManager.GameDataLoader.CardDataPrefabs;
+            var mobs_cards = (from x in cards
+                where typeof(Mob).IsInstanceOfType(x)
+                select (Mob)x).ToList<Mob>();
+
+            string path = @"mobs.yaml";
+            StreamWriter sw = File.CreateText(path);
+
+            string csv_path = @"mobs.csv";
+            StreamWriter csv = File.CreateText(csv_path);
+            csv.Write($"Name,drop_count\n");
+
+            foreach(var card in mobs_cards)
+            {
+                Plugin.Log.LogInfo($"{card.Id}");
+                csv.Write($"{card.Id},");
+                csv.Write($"{card.Drops.CardsInPack}\n");
+                sw.Write($"{card.Id}:\n");
+                foreach(var card_chance in get_bag_chances(card.Drops))
+                {
+                    sw.Write($"  {card_chance.Key}: {card_chance.Value}\n");
+                }
+            }
+            csv.Close();
             sw.Close();
         }
 
