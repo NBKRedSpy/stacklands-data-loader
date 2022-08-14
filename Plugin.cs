@@ -1,11 +1,10 @@
 ﻿using BepInEx;
 using HarmonyLib;
-using static WorldManager;
 using BepInEx.Logging;
 using System.Linq;
 using System.IO;
-using UnityEngine;
 using System.Collections.Generic;
+using static Harvestable;
 
 namespace DataLoaderPlugin
 {
@@ -27,14 +26,14 @@ namespace DataLoaderPlugin
         [HarmonyPostfix] 
         private static void WorldManager__Load(ref WorldManager __instance)
         {
-            load_boosters();
+            load_boosters(__instance);
+            load_harvestable(__instance);
         }
 
-        private static void load_boosters()
+        private static void load_boosters(WorldManager worldManager)
         {
             Plugin.Log.LogInfo($"Load Boosters");
-            var boosterPackPrefabs = Resources.LoadAll<Boosterpack>("Boosters").ToList<Boosterpack>();
-            boosterPackPrefabs.AddRange(Resources.LoadAll<Boosterpack>("Island_Boosters"));
+            var boosterPackPrefabs = worldManager.GameDataLoader.BoosterPackPrefabs;
 
             string path = @"boosters-recipes.yaml";
             StreamWriter sw = File.CreateText(path);
@@ -42,7 +41,7 @@ namespace DataLoaderPlugin
             foreach(var booster_pref in boosterPackPrefabs)
             {
                 // var booster = Object.Instantiate<Boosterpack>(booster_pref);
-                sw.Write($"{booster_pref.Name}:\n");
+                sw.Write($"{booster_pref.Name}\n");
                 Plugin.Log.LogInfo($"{booster_pref.Name}:");
                 foreach(var card_chance in calc_booster_chances(booster_pref))
                 {
@@ -53,10 +52,30 @@ namespace DataLoaderPlugin
             sw.Close();
         }
 
-        private static void load_harvestable()
+        private static void load_harvestable(WorldManager worldManager)
         {
             Plugin.Log.LogInfo($"Load Harvestable");
-            var cards = Resources.LoadAll<Boosterpack>("Boosters").ToList<Boosterpack>();
+            var cards = worldManager.GameDataLoader.CardDataPrefabs;
+            var harvestable_cards = (from x in cards
+                where typeof(Harvestable).IsInstanceOfType(x)
+                select (Harvestable)x).ToList<Harvestable>();
+
+            string path = @"harvestable.yaml";
+            StreamWriter sw = File.CreateText(path);
+
+            foreach(var card in harvestable_cards)
+            {
+                Plugin.Log.LogInfo($"{card.Id}");
+                sw.Write($"{card.Id}:\n");
+                sw.Write($"  cards:\n");
+                foreach(var card_chance in get_bag_chances(card.MyCardBag))
+                {
+                    sw.Write($"    {card_chance.Key}: {card_chance.Value}\n");
+                }
+                sw.Write($"  time: {card.HarvestTime}\n");
+            }
+
+            sw.Close();
         }
 
         private static Dictionary<string, float> get_bag_chances(CardBag bag)
@@ -83,7 +102,6 @@ namespace DataLoaderPlugin
                     }
                     else
                     {
-                        Plugin.Log.LogInfo($"SetCardBag:{bag.SetCardBag}");
                         chances = CardBag.GetChancesForSetCardBag(WorldManager.instance.GameDataLoader, bag.SetCardBag, null);
                     }
                 }
@@ -107,16 +125,13 @@ namespace DataLoaderPlugin
                     if(result.ContainsKey(cardChance.Key))
                     {
                         result[cardChance.Key] += ( 1- result[cardChance.Key]) * cardChance.Value;
-                        Plugin.Log.LogInfo($"change: {cardChance.Key}={result[cardChance.Key]}");
                     }
                     else
                     {
                         result[cardChance.Key] = cardChance.Value;
-                        Plugin.Log.LogInfo($"add: {cardChance.Key}={cardChance.Value}");
                     }
                 }
             }
-            Plugin.Log.LogInfo($"result.Count={result.Count}");
             return result;
         }
 
