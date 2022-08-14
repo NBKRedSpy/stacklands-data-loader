@@ -29,6 +29,7 @@ namespace DataLoaderPlugin
             load_boosters(__instance);
             load_harvestable(__instance);
             load_mobs(__instance);
+            blue_prints(__instance);
         }
 
         private static void load_boosters(WorldManager worldManager)
@@ -109,6 +110,40 @@ namespace DataLoaderPlugin
             sw.Close();
         }
 
+        private static void blue_prints(WorldManager worldManager)
+        {
+            Plugin.Log.LogInfo($"Load Blueprints");
+            var blueprints = worldManager.GameDataLoader.BlueprintPrefabs;
+
+            string path = @"recipes.yaml";
+            StreamWriter sw = File.CreateText(path);
+
+            foreach(var blueprint in blueprints)
+            {
+                foreach(var subprint in blueprint.Subprints)
+                {
+                    sw.Write($"-\n");
+                    sw.Write("  inp: {");
+                    print_cards(sw, subprint.RequiredCards);
+                    sw.Write("}\n");
+
+                    if (string.IsNullOrEmpty(subprint.ResultCard))
+                    {
+                        sw.Write("  out: {");
+                        print_cards(sw, subprint.ExtraResultCards);
+                        sw.Write("}\n");
+                    }
+                    else
+                    {
+                        sw.Write($"  out: {{{subprint.ResultCard}: 1}}\n");
+                    }
+
+                    sw.Write($"  time: {subprint.Time}\n");
+                }
+            }
+            sw.Close();
+        }
+
         private static Dictionary<string, float> get_bag_chances(CardBag bag)
         {
             var result = new Dictionary<string, float>();
@@ -183,6 +218,25 @@ namespace DataLoaderPlugin
             throw new System.Exception("bag overflow");
         }
 
+    private static void print_cards(StreamWriter stream, string[] cards)
+    {
+        var inputs = new Dictionary<string, int>();
+        foreach(var card in cards)
+        {
+            if (inputs.ContainsKey(card))
+            {
+                inputs[card] += 1;
+            }
+            else
+            {
+                inputs[card] = 1;
+            }
+        }
+        foreach(var card in inputs)
+        {
+            stream.Write($"{card.Key}: {card.Value}, ");
+        }
+    }
     }
 
 }
