@@ -42,8 +42,6 @@ namespace DataLoaderPlugin
 
             foreach(var booster_pref in boosterPackPrefabs)
             {
-                // var booster = Object.Instantiate<Boosterpack>(booster_pref);
-                sw.Write($"{booster_pref.Name}\n");
                 Plugin.Log.LogInfo($"{booster_pref.Name}:");
                 foreach(var card_chance in calc_booster_chances(booster_pref))
                 {
@@ -104,12 +102,25 @@ namespace DataLoaderPlugin
             string path = @"mobs.yaml";
             StreamWriter sw = File.CreateText(path);
 
+            StreamWriter animals_recipes = File.CreateText(@"animals_recipes.yaml");
+
             string csv_path = @"mobs.csv";
             StreamWriter csv = File.CreateText(csv_path);
             csv.Write($"Name,drop_count\n");
 
             foreach(var card in mobs_cards)
             {
+                if (typeof(Animal).IsInstanceOfType(card))
+                {
+                    var animal = (Animal)card;
+                    if (animal.CreateCard != "")
+                    {
+                        animals_recipes.Write($"-\n");
+                        animals_recipes.Write($"  inp: {{{card.Id}: 1}}\n");
+                        animals_recipes.Write($"  out: {{{animal.CreateCard}: 1}}\n");
+                        animals_recipes.Write($"  time: {animal.CreateTime}\n");
+                    }
+                }
                 csv.Write($"{card.Id},");
                 csv.Write($"{card.Drops.CardsInPack}\n");
                 sw.Write($"{card.Id}:\n");
@@ -118,6 +129,7 @@ namespace DataLoaderPlugin
                     sw.Write($"  {card_chance.Key}: {card_chance.Value}\n");
                 }
             }
+            animals_recipes.Close();
             csv.Close();
             sw.Close();
         }
