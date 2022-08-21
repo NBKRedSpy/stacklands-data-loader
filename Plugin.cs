@@ -30,6 +30,47 @@ namespace DataLoaderPlugin
             load_harvestable(__instance);
             load_mobs(__instance);
             blue_prints(__instance);
+            travelling_cart(__instance);
+            treasure_chest(__instance);
+        }
+
+        private static void treasure_chest(WorldManager worldManager)
+        {
+            Plugin.Log.LogInfo($"Simulate Treasure Chest");
+            List<CardData> cards = (from x in WorldManager.instance.CardDataPrefabs
+            where (x.MyCardType == CardType.Resources || x.MyCardType == CardType.Food) && !x.IsIslandCard
+            select x).ToList<CardData>();
+            cards.RemoveAll((CardData x) => x.Id == "goblet");
+            float chance = 1 / (float)cards.Count;
+
+            StreamWriter recipes = File.CreateText(@"treasure-chest-recipes.yaml");
+
+            foreach(var card in cards)
+            {
+                recipes.Write("-\n");
+                recipes.Write($"  inp: {{treasure_chest: 1, key: 1}}\n");
+                recipes.Write($"  out: {{{card.Id}: 1}}\n");
+                recipes.Write($"  chance: {chance}\n");
+            }
+            recipes.Close();
+        }
+
+        private static void travelling_cart(WorldManager worldManager)
+        {
+            Plugin.Log.LogInfo($"Load Travelling cart");
+            var travelling_cart = (TravellingCart) worldManager.GetCardPrefab("travelling_cart");
+
+            StreamWriter recipes = File.CreateText(@"travelling-cart-recipes.yaml");
+
+            var new_chances = get_bag_chances(travelling_cart.MyCardBag);
+            foreach(var cardChance in new_chances)
+            {
+                recipes.Write("-\n");
+                recipes.Write($"  inp: {{travelling_cart: 1, coin: 5}}\n");
+                recipes.Write($"  out: {{{cardChance.Key}: 1}}\n");
+                recipes.Write($"  chance: {cardChance.Value}\n");
+            }
+            recipes.Close();
         }
 
         private static void load_boosters(WorldManager worldManager)
@@ -42,7 +83,6 @@ namespace DataLoaderPlugin
 
             foreach(var booster_pref in boosterPackPrefabs)
             {
-                Plugin.Log.LogInfo($"{booster_pref.Name}:");
                 foreach(var card_chance in calc_booster_chances(booster_pref))
                 {
                     sw.Write($"  {card_chance.Key}: {card_chance.Value}\n");
