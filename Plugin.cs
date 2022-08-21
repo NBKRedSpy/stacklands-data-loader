@@ -67,7 +67,20 @@ namespace DataLoaderPlugin
 
             foreach(var card in harvestable_cards)
             {
-                Plugin.Log.LogInfo($"{card.Id}");
+                sw.Write($"{card.Id}:\n");
+                sw.Write($"  cards:\n");
+                foreach(var card_chance in get_bag_chances(card.MyCardBag))
+                {
+                    sw.Write($"    {card_chance.Key}: {card_chance.Value}\n");
+                }
+                sw.Write($"  time: {card.HarvestTime}\n");
+            }
+
+            var combatable_harvestable_cards = (from x in cards
+                where typeof(CombatableHarvestable).IsInstanceOfType(x)
+                select (CombatableHarvestable)x).ToList<CombatableHarvestable>();
+            foreach(var card in combatable_harvestable_cards)
+            {
                 sw.Write($"{card.Id}:\n");
                 sw.Write($"  cards:\n");
                 foreach(var card_chance in get_bag_chances(card.MyCardBag))
@@ -97,7 +110,6 @@ namespace DataLoaderPlugin
 
             foreach(var card in mobs_cards)
             {
-                Plugin.Log.LogInfo($"{card.Id}");
                 csv.Write($"{card.Id},");
                 csv.Write($"{card.Drops.CardsInPack}\n");
                 sw.Write($"{card.Id}:\n");
