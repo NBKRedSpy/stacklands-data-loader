@@ -17,23 +17,55 @@
             "group": "build",
             "presentation": {
                 "reveal": "silent"
-            },
-            "problemMatcher": "$msCompile",
-        },
+            },    
+        },    
+        //Publish is required to copy all the nuget dependencies to the output.
         {
-            "label": "copy plugin",
-            "command": "copy",
+            "label": "publish",
+            "command": "dotnet",
             "type": "shell",
             "args": [
-                "bin/Debug/netstandard2.0/DataLoaderPlugin.dll",
-                "C:/Games/Steam/steamapps/common/Stacklands/BepInEx/plugins/DataLoaderPlugin.dll"
+                "publish",
+                "-c",
+                "Release",
             ],
             "problemMatcher": "$msCompile",
-            "dependsOn": ["build"],
+        },
+
+        // support for r2modman, which uses a different folder for mods.        
+        {
+            "label": "copy r2modman",
+            "command": "Copy-Item",
+            "type": "shell",
+            "args": [
+                "bin/Release/netstandard2.0/publish/*",
+                "-Destination",
+                "$env:AppData/r2modmanPlus-local/Stacklands/profiles/Default/BepInEx/plugins",
+                "-include",
+                "DataLoaderPlugin.dll,",
+                "YamlDotNet.dll"
+            ],
+            "problemMatcher": "$msCompile",
+            "dependsOn": ["publish"],
+        },        
+        {
+            "label": "copy plugin",
+            "command": "Copy-Item",
+            "type": "shell",
+            "args": [
+                "bin/Release/netstandard2.0/publish/*",
+                "-Destination",
+                "C:/Steam/steamapps/common/Stacklands/BepInEx/plugins/",
+                "-include",
+                "DataLoaderPlugin.dll,",
+                "YamlDotNet.dll"
+            ],
+            "problemMatcher": "$msCompile",
+            "dependsOn": ["publish"],
         },
         {
             "label": "run stackland",
-            "command": "C:/Games/Steam/steamapps/common/Stacklands/Stacklands.exe",
+            "command": "C:/Game/Steam/steamapps/common/Stacklands/Stacklands.exe",
             "type": "shell",
             "presentation": {
                 "reveal": "silent"
