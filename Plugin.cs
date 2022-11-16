@@ -4,15 +4,19 @@ using BepInEx.Logging;
 using System.Linq;
 using System.IO;
 using System.Collections.Generic;
-using static Harvestable;
+using YamlDotNet.Serialization;
+using d = DataLoaderPlugin.Dto;
+using System;
+using UnityEngine;
 
 namespace DataLoaderPlugin
 {
+
     [BepInPlugin("bepinex.plugins.stacklands.dataloader", PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
     [BepInProcess("Stacklands.exe")]
     public class Plugin : BaseUnityPlugin
     {
-        static ManualLogSource Log;
+        public static ManualLogSource Log;
 
         private void Awake()
         {
@@ -20,57 +24,65 @@ namespace DataLoaderPlugin
             Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} is loaded!");
             Harmony.CreateAndPatchAll(typeof(Plugin));
         }
-    
 
         [HarmonyPatch(typeof(WorldManager), "Play")]
-        [HarmonyPostfix] 
+        [HarmonyPostfix]
         private static void WorldManager__Load(ref WorldManager __instance)
         {
+
+            CardUtility cardUtility = new CardUtility(__instance);
+
             load_boosters(__instance);
-            load_harvestable(__instance);
-            load_mobs(__instance);
-            blue_prints(__instance);
-            travelling_cart(__instance);
-            treasure_chest(__instance);
+            load_harvestable(__instance, cardUtility);
+            load_mobs(__instance, cardUtility);
+            blue_prints(__instance, cardUtility);
+            travelling_cart(__instance, cardUtility);
+            treasure_chest(__instance, cardUtility);
         }
 
-        private static void treasure_chest(WorldManager worldManager)
+        private static void treasure_chest(WorldManager worldManager, CardUtility cardUtility)
         {
             Plugin.Log.LogInfo($"Simulate Treasure Chest");
             List<CardData> cards = (from x in WorldManager.instance.CardDataPrefabs
-            where (x.MyCardType == CardType.Resources || x.MyCardType == CardType.Food) && !x.IsIslandCard
-            select x).ToList<CardData>();
+                                    where (x.MyCardType == CardType.Resources || x.MyCardType == CardType.Food) && !x.IsIslandCard
+                                    select x).ToList<CardData>();
             cards.RemoveAll((CardData x) => x.Id == "goblet");
             float chance = 1 / (float)cards.Count;
 
-            StreamWriter recipes = File.CreateText(@"treasure-chest-recipes.yaml");
+            const string TreasureChestId = "treasure_chest";
+            const string KeyId = "key";
+            d.ChanceContainer container = new d.ChanceContainer(TreasureChestId, cardUtility);                
 
-            foreach(var card in cards)
+            container.Inp.Add(new d.ResourceCount(TreasureChestId, cardUtility, 1));
+            container.Inp.Add(new d.ResourceCount(KeyId, cardUtility, 1));
+
+            foreach (var card in cards)
             {
-                recipes.Write("-\n");
-                recipes.Write($"  inp: {{treasure_chest: 1, key: 1}}\n");
-                recipes.Write($"  out: {{{card.Id}: 1}}\n");
-                recipes.Write($"  chance: {chance}\n");
+                container.ChanceCards.Add(new d.ItemChance(card.Name, card.Id, cardUtility.GetColors(card), chance));
             }
-            recipes.Close();
+            WriteYaml("treasure-chest-recipes.yaml", container);
         }
 
-        private static void travelling_cart(WorldManager worldManager)
+        private static void travelling_cart(WorldManager worldManager, CardUtility cardUtility)
         {
             Plugin.Log.LogInfo($"Load Travelling cart");
-            var travelling_cart = (TravellingCart) worldManager.GetCardPrefab("travelling_cart");
+            var travelling_cart = (TravellingCart)worldManager.GetCardPrefab("travelling_cart");
 
-            StreamWriter recipes = File.CreateText(@"travelling-cart-recipes.yaml");
+            //The single card Yaml format
+            d.ChanceContainer container = new d.ChanceContainer(travelling_cart, cardUtility);
+
+            container.Inp.Add(new d.ResourceCount(travelling_cart.Name, travelling_cart.Id, cardUtility.GetColors(travelling_cart), 1));
+            container.Inp.Add(new d.ResourceCount("Coin", "coin", cardUtility.GetColors(travelling_cart),
+                1));
 
             var new_chances = get_bag_chances(travelling_cart.MyCardBag);
-            foreach(var cardChance in new_chances)
+            foreach (var cardChance in new_chances)
             {
-                recipes.Write("-\n");
-                recipes.Write($"  inp: {{travelling_cart: 1, coin: 5}}\n");
-                recipes.Write($"  out: {{{cardChance.Key}: 1}}\n");
-                recipes.Write($"  chance: {cardChance.Value}\n");
+                container.ChanceCards.Add(
+                    new d.ItemChance(cardChance.Key, cardUtility, cardChance.Value));
             }
-            recipes.Close();
+
+            WriteYaml("traveling-cart-recipes.yaml", new[] { container });
         }
 
         private static void load_boosters(WorldManager worldManager)
@@ -81,9 +93,9 @@ namespace DataLoaderPlugin
             string path = @"boosters-recipes.yaml";
             StreamWriter sw = File.CreateText(path);
 
-            foreach(var booster_pref in boosterPackPrefabs)
+            foreach (var booster_pref in boosterPackPrefabs)
             {
-                foreach(var card_chance in calc_booster_chances(booster_pref))
+                foreach (var card_chance in calc_booster_chances(booster_pref))
                 {
                     sw.Write($"  {card_chance.Key}: {card_chance.Value}\n");
                 }
@@ -92,120 +104,164 @@ namespace DataLoaderPlugin
             sw.Close();
         }
 
-        private static void load_harvestable(WorldManager worldManager)
+        private static void load_harvestable(WorldManager worldManager, CardUtility cardUtility)
         {
             Plugin.Log.LogInfo($"Load Harvestable");
             var cards = worldManager.GameDataLoader.CardDataPrefabs;
             var harvestable_cards = (from x in cards
-                where typeof(Harvestable).IsInstanceOfType(x)
-                select (Harvestable)x).ToList<Harvestable>();
+                                     where typeof(Harvestable).IsInstanceOfType(x)
+                                     select (Harvestable)x).ToList<Harvestable>();
 
-            string path = @"harvestable.yaml";
-            StreamWriter sw = File.CreateText(path);
+            List<d.TimedProducerCard> producers = new List<d.TimedProducerCard>();
 
-            foreach(var card in harvestable_cards)
+            foreach (var card in harvestable_cards)
             {
-                sw.Write($"{card.Id}:\n");
-                sw.Write($"  cards:\n");
-                foreach(var card_chance in get_bag_chances(card.MyCardBag))
+
+                //Finish Here - Convert this to card data.  Create the base class info to match.
+                d.TimedProducerCard producer = new d.TimedProducerCard(card.Id, card.Name, card.HarvestTime,
+                    new List<d.ItemChance>(), cardUtility.GetColors(card));
+
+                //Bug:  There are some blank cards.  Research why.
+                //  Examples: Cave, Catacombs
+                foreach (var card_chance in get_bag_chances(card.MyCardBag)
+                    .Where(x => !string.IsNullOrEmpty(x.Key)))
                 {
-                    sw.Write($"    {card_chance.Key}: {card_chance.Value}\n");
+                    producer.ItemChances.Add(new d.ItemChance(card_chance.Key, cardUtility,card_chance.Value));
                 }
-                sw.Write($"  time: {card.HarvestTime}\n");
+
+                producers.Add(producer);
             }
 
-            var combatable_harvestable_cards = (from x in cards
+
+            var combatable_harvestable_cards = (
+                from x in cards
                 where typeof(CombatableHarvestable).IsInstanceOfType(x)
-                select (CombatableHarvestable)x).ToList<CombatableHarvestable>();
-            foreach(var card in combatable_harvestable_cards)
+                select (CombatableHarvestable)x)
+                .ToList<CombatableHarvestable>();
+
+            foreach (var card in combatable_harvestable_cards)
             {
-                sw.Write($"{card.Id}:\n");
-                sw.Write($"  cards:\n");
-                foreach(var card_chance in get_bag_chances(card.MyCardBag))
+                d.TimedProducerCard producer = new d.TimedProducerCard(card.Id, card.Name, card.HarvestTime,
+                    new List<d.ItemChance>(), cardUtility.GetColors(card));
+
+                foreach (var card_chance in get_bag_chances(card.MyCardBag))
                 {
-                    sw.Write($"    {card_chance.Key}: {card_chance.Value}\n");
+                    producer.ItemChances.Add(new d.ItemChance(card_chance.Key, cardUtility , card_chance.Value));
                 }
-                sw.Write($"  time: {card.HarvestTime}\n");
             }
 
-            sw.Close();
+            WriteYaml("harvestable.yaml", producers);
+
         }
 
-        private static void load_mobs(WorldManager worldManager)
+        private static void load_mobs(WorldManager worldManager, CardUtility cardUtility)
         {
             Plugin.Log.LogInfo($"Load Mobs");
             var cards = worldManager.GameDataLoader.CardDataPrefabs;
             var mobs_cards = (from x in cards
-                where typeof(Mob).IsInstanceOfType(x)
-                select (Mob)x).ToList<Mob>();
+                              where typeof(Mob).IsInstanceOfType(x)
+                              select (Mob)x).ToList<Mob>();
 
-            string path = @"mobs.yaml";
-            StreamWriter sw = File.CreateText(path);
-
-            StreamWriter animals_recipes = File.CreateText(@"animals_recipes.yaml");
 
             string csv_path = @"mobs.csv";
             StreamWriter csv = File.CreateText(csv_path);
             csv.Write($"Name,drop_count\n");
 
-            foreach(var card in mobs_cards)
+            List<d.AnimalRecipe> animalRecipies = new List<Dto.AnimalRecipe>();
+            List<d.ProducerCard> mobs = new List<d.ProducerCard>();
+
+                
+            foreach (var card in mobs_cards)
             {
+                d.CardColors mobCardColors = cardUtility.GetColors(card);
+
                 if (typeof(Animal).IsInstanceOfType(card))
                 {
                     var animal = (Animal)card;
                     if (animal.CreateCard != "")
                     {
-                        animals_recipes.Write($"-\n");
-                        animals_recipes.Write($"  inp: {{{card.Id}: 1}}\n");
-                        animals_recipes.Write($"  out: {{{animal.CreateCard}: 1}}\n");
-                        animals_recipes.Write($"  time: {animal.CreateTime}\n");
+                        d.AnimalRecipe animalRecipe = new d.AnimalRecipe(
+                            new d.ResourceCount(card.Id, card.Name, 
+                                mobCardColors, 1),
+                            new d.ResourceCount(animal.CreateCard, cardUtility, 1 ),
+                            animal.CreateTime,
+                            mobCardColors);
+
+                        animalRecipies.Add(animalRecipe);
                     }
                 }
+
+
                 csv.Write($"{card.Id},");
                 csv.Write($"{card.Drops.CardsInPack}\n");
-                sw.Write($"{card.Id}:\n");
-                foreach(var card_chance in get_bag_chances(card.Drops))
+
+                d.ProducerCard mob = new d.ProducerCard(card.Id, card.Name, new List<d.ItemChance>(),
+                    mobCardColors);
+
+                foreach (var card_chance in get_bag_chances(card.Drops))
                 {
-                    sw.Write($"  {card_chance.Key}: {card_chance.Value}\n");
+                    mob.ItemChances.Add(new d.ItemChance(card_chance.Key, cardUtility,card_chance.Value));
                 }
+                mobs.Add(mob);
             }
-            animals_recipes.Close();
+
             csv.Close();
-            sw.Close();
+
+            //--- Write YAML
+
+            WriteYaml("mobs.yaml", mobs);
+            WriteYaml(@"animals_recipes.yaml", animalRecipies);
+
         }
 
-        private static void blue_prints(WorldManager worldManager)
+        private static void WriteYaml<T>(string filePath, T item)
+        {
+            ISerializer seralizer = new SerializerBuilder()
+                .WithNamingConvention(YamlDotNet.Serialization.NamingConventions.CamelCaseNamingConvention.Instance)
+                .DisableAliases()
+                .Build();
+
+            File.WriteAllText(filePath, seralizer.Serialize(item));
+        }
+
+        private static void blue_prints(WorldManager worldManager, CardUtility cardUtility)
         {
             Plugin.Log.LogInfo($"Load Blueprints");
             var blueprints = worldManager.GameDataLoader.BlueprintPrefabs;
 
-            string path = @"recipes.yaml";
-            StreamWriter sw = File.CreateText(path);
+            List<d.Blueprint> yamlBlueprints = new List<d.Blueprint>();
 
-            foreach(var blueprint in blueprints)
+            foreach (var blueprint in blueprints)
             {
-                foreach(var subprint in blueprint.Subprints)
+
+                foreach (var subprint in blueprint.Subprints)
                 {
-                    sw.Write($"-\n");
-                    sw.Write("  inp: {");
-                    print_cards(sw, subprint.RequiredCards);
-                    sw.Write("}\n");
+                    d.Blueprint yamlBlueprint = new d.Blueprint()
+                    {
+                        Name = blueprint.Name,
+                        Id = blueprint.Id,
+                    };
+
+                    yamlBlueprint.Inp = GetResources(cardUtility, subprint.RequiredCards);
 
                     if (string.IsNullOrEmpty(subprint.ResultCard))
                     {
-                        sw.Write("  out: {");
-                        print_cards(sw, subprint.ExtraResultCards);
-                        sw.Write("}\n");
+                        
+                        yamlBlueprint.Out = GetResources(cardUtility, subprint.ExtraResultCards);
                     }
                     else
                     {
-                        sw.Write($"  out: {{{subprint.ResultCard}: 1}}\n");
+                        yamlBlueprint.Out = GetResources(cardUtility, new[] { subprint.ResultCard });
                     }
 
-                    sw.Write($"  time: {subprint.Time}\n");
+                    yamlBlueprint.Time = subprint.Time;
+                    yamlBlueprints.Add(yamlBlueprint);
                 }
             }
-            sw.Close();
+
+            //--- Write YAML
+            WriteYaml("recipes.yaml", yamlBlueprints);
+
         }
 
         private static Dictionary<string, float> get_bag_chances(CardBag bag)
@@ -236,9 +292,9 @@ namespace DataLoaderPlugin
                     }
                 }
                 var chance_sum = Enumerable.Sum(chances, (CardChance x) => x.Chance);
-                foreach(var cardChance in chances)
+                foreach (var cardChance in chances)
                 {
-                    result[cardChance.Id]= (float)cardChance.Chance / (float)chance_sum;
+                    result[cardChance.Id] = (float)cardChance.Chance / (float)chance_sum;
                 }
                 return result;
             }
@@ -246,15 +302,15 @@ namespace DataLoaderPlugin
         private static Dictionary<string, float> calc_booster_chances(Boosterpack booster)
         {
             var result = new Dictionary<string, float>();
-            for(int i = 1; i <= booster.TotalCardsInPack; i++)
+            for (int i = 1; i <= booster.TotalCardsInPack; i++)
             {
                 CardBag currentCardBag = get_bag(booster, i);
                 var new_chances = get_bag_chances(currentCardBag);
-                foreach(var cardChance in new_chances)
+                foreach (var cardChance in new_chances)
                 {
-                    if(result.ContainsKey(cardChance.Key))
+                    if (result.ContainsKey(cardChance.Key))
                     {
-                        result[cardChance.Key] += ( 1- result[cardChance.Key]) * cardChance.Value;
+                        result[cardChance.Key] += (1 - result[cardChance.Key]) * cardChance.Value;
                     }
                     else
                     {
@@ -268,12 +324,12 @@ namespace DataLoaderPlugin
         private static CardBag get_bag(Boosterpack booster, int tap_number)
         {
             int tap = tap_number;
-            foreach(var bag in booster.CardBags)
+            foreach (var bag in booster.CardBags)
             {
-                for(int i = 0; i < bag.CardsInPack; i++)
+                for (int i = 0; i < bag.CardsInPack; i++)
                 {
                     tap--;
-                    if(tap == 0)
+                    if (tap == 0)
                     {
                         return bag;
                     }
@@ -282,25 +338,13 @@ namespace DataLoaderPlugin
             throw new System.Exception("bag overflow");
         }
 
-    private static void print_cards(StreamWriter stream, string[] cards)
-    {
-        var inputs = new Dictionary<string, int>();
-        foreach(var card in cards)
+        private static List<d.ResourceCount> GetResources(CardUtility cardUtility,  string [] cards)
         {
-            if (inputs.ContainsKey(card))
+            return cards.Distinct().Select(cardId =>
             {
-                inputs[card] += 1;
-            }
-            else
-            {
-                inputs[card] = 1;
-            }
+                return new d.ResourceCount(cardId, cardUtility, cards.Count(x => x == cardId));
+            }).ToList();
         }
-        foreach(var card in inputs)
-        {
-            stream.Write($"{card.Key}: {card.Value}, ");
-        }
-    }
-    }
 
+    }
 }
